@@ -1,0 +1,239 @@
+---
+title: "HW3"
+output:
+  pdf_document: 
+    latex_engine: xelatex
+  html_notebook: default
+  html_document:
+    df_print: paged
+
+---
+### 1 and 2.
+```{r}
+
+
+suppressPackageStartupMessages(library(miceadds))
+suppressPackageStartupMessages(library(tidyverse))
+suppressPackageStartupMessages(library(skimr))
+suppressPackageStartupMessages(library(factoextra))
+suppressPackageStartupMessages(library(seriation))
+suppressPackageStartupMessages(library(cluster))
+suppressPackageStartupMessages(library(clValid))
+Pdata <-load.Rdata2("legprof-components.v1.0.RData",path=getwd())
+#munge the data
+Pdata_sub <- Pdata[Pdata$sessid == "2009/10",]%>%dplyr::select(stateabv, t_slength, slength,salary_real, expend)%>%drop_na()
+head(Pdata_sub)
+states = as.data.frame(Pdata_sub$stateabv)
+data = Pdata_sub%>%dplyr::select(t_slength, slength,salary_real, expend)
+data_scaled = scale(data)
+data_dist_euc <- dist(data_scaled, 
+               method = "euclidean")
+
+```
+### 3. 
+
+Numerical analysis suggests the existence of a extreme outliers in distributions along all dimensions.
+
+```{r}
+###Figure out where the outliers are
+suppressPackageStartupMessages(library(ggplot2))
+skim(Pdata_sub)
+ggplot(as.data.frame(data_scaled), aes(x=t_slength)) + geom_histogram()
+ggplot(as.data.frame(data_scaled), aes(x=slength)) + geom_histogram()
+ggplot(as.data.frame(data_scaled), aes(x=salary_real)) + geom_histogram()
+ggplot(as.data.frame(data_scaled), aes(x=expend)) + geom_histogram()
+df <- as.data.frame(data_scaled)%>%dplyr::select(t_slength, slength,salary_real, expend)
+```
+A scatter plot is created at the end comparing one variable versus the other three. Once again, there are a few extreme outliers:
+```{r}
+df_melt=reshape2::melt(df, id.var = 'expend')
+ggplot(df_melt,aes(x=expend,y=value)) + geom_point() 
+
+df_melt=reshape2::melt(df, id.var = 't_slength')
+ggplot(df_melt,aes(x=t_slength,y=value)) + geom_point() 
+
+df_melt=reshape2::melt(df, id.var = 'slength')
+ggplot(df_melt,aes(x=slength,y=value)) + geom_point() 
+
+df_melt=reshape2::melt(df, id.var = 'salary_real')
+ggplot(df_melt,aes(x=salary_real,y=value)) + geom_point() 
+```
+
+### 4. 
+We will calculate Hopkins statistic as well as the ODI plots for the different distance measures
+
+```{r}
+data_dist_euc <- dist(data_scaled, 
+               method = "euclidean")
+data_dist_man <- dist(data_scaled, 
+               method = "manhattan")
+data_dist_can <- dist(data_scaled, 
+               method = "canberra")
+get_clust_tendency(data_scaled, nrow(data_scaled)-1, graph = FALSE, seed = 123)
+dissplot(data_dist_euc)
+dissplot(data_dist_man)
+dissplot(data_dist_can)
+```
+The Hopkins statistic suggests clusterability, however the picture with the ODI plots are not clear. Part of the problem might be the low number of data points leading to a low resolution picture, nevertheless the plot is hard to interpret. While the ODI plots for Manhattan and euclidean distance are similar, the ODI plot for the Canberra distance is very different, suggesting different clustering results.
+
+### 5.
+```{r}
+set.seed(7355)
+kmeans <- kmeans(data_scaled, 
+                 centers = 2,
+                 nstart = 15)
+
+#str(kmeans)
+print ("Cluster assignments:")
+kmeans$cluster
+print ("Cluster centers:")
+kmeans$centers
+print ("Cluster sizes:")
+kmeans$size
+states$kcluster <- as.factor(kmeans$cluster)
+print ("Total sum of squares")
+kmeans$totss/49
+print ("Average within cluster sum of squares in Cluster 1")
+kmeans$withinss[1]/kmeans$size[1]
+print ("Average within cluster sum of squares in Cluster 2")
+kmeans$withinss[2]/kmeans$size[2]
+print ("Total sum of squares:")
+kmeans$totss
+print ("Between sum of squares")
+kmeans$betweenss
+print ("Within sum sum of squares")
+kmeans$withinss
+```
+We notice from the above that there are two clusters, one very big cluster and one smaller. This suggests that the smaller cluster might be outliers. The similar means of the individual variables suggest this to be the case. Given the comparison of the three average cluster sums, it seems like the smaller cluster is not compact and the bigger cluster is. This suggests the first cluster contains disparate outliers and the between sum of squares suggest a good separation between the clusters
+
+### 6. 
+```{r}
+suppressPackageStartupMessages(library(mixtools)) # fitting GMMs via EM (mixture modle)
+library(plotGMM) # customizing GMM plot for visual output
+set.seed(7355) # set seed for interations to return to same place
+
+gmm1 <- mvnormalmixEM(data_scaled, 
+                    k = 2)
+#Calculating components
+c1 <- which(data.frame(gmm1$posterior)$comp.1>0.5)
+
+c2 <- which(data.frame(gmm1$posterior)$comp.2>0.5)
+
+#Storing components in table
+states$gmm=as.factor(ifelse(as.data.frame(gmm1$posterior)$comp.1>0.5,1,2))
+
+print ("No of points in component 1:")
+l1<-length(c2)
+l1
+print ("No of points in component 2:")
+l2<-nrow(data_scaled)-l1
+l2
+print ("Constituents of component 1 from k-means:")
+which(states$kcluster==1)
+print ("Constituents of component 1 from gmm:")
+c1
+gmm1
+
+```
+We can see from the above that the clustering results of GMM and k-means converged in the sense that, if one goes from soft clustering to hard clustering using the criteria of P(Cluster_1)>0.5 for belonging to Cluster 1. Thus what we learned from k-means probably applies here.
+### 7.
+```{r}
+set.seed(7355)
+pmc<-pam(data_scaled, 2, metric = "euclidean", stand = FALSE)
+states$pmc<-ifelse(pmc$clustering==1,2,1)
+"Components of cluster 1 from PAM:"
+which(states$pmc==1)
+"Components of cluster 1 from K-means:"
+which(states$kcluster==1)
+"Components of cluster 1  from GMM:"
+which(states$gmm==1)
+
+```
+I have used PAM, since I thought it might be interesting to see
+how a mediods algorithm behaves with respect to outliers.
+It seems like the clustering is similar to the first two algorithms except for the inclusion of the one extra data point in cluster 1. This could be because the median might have in it's "range" that extra point, which makes sense since the within-cluster distance of this cluster seems to be big.
+
+### 8. Plots
+I will plot salary versus session length in the scatterplots below which I will color by clustering. From the analysis above, I expect similar clustering of the states across all three algorithms.
+
+Scatterplot of session length versus salary:
+```{r, fig.height=8, fig.width=12}
+suppressPackageStartupMessages(library(gridExtra))
+p1<-ggplot(as.data.frame(data_scaled), aes(x=as.data.frame(data_scaled)$slength, y=as.data.frame(data_scaled)$salary, label=Pdata_sub$stateabv,color = states$kcluster)) + 
+  geom_point() + 
+  theme_bw() +
+   geom_text(label=Pdata_sub$stateabv, size=8)+
+  scale_fill_manual(values=c("red","blue")) +
+  labs(x = "Slength",
+       y = "Salary") 
+
+p2<-ggplot(as.data.frame(data_scaled), aes(x=as.data.frame(data_scaled)$slength, y=as.data.frame(data_scaled)$salary, label=Pdata_sub$stateabv,color = states$gmm)) + 
+  geom_point() + 
+  theme_bw() +
+   geom_text(label=Pdata_sub$stateabv, size=8)+
+  scale_fill_manual(values=c("red","blue")) +
+  labs(x = "Slength",
+       y = "Salary") 
+
+p3<-ggplot(as.data.frame(data_scaled), aes(x=as.data.frame(data_scaled)$slength, y=as.data.frame(data_scaled)$salary, label=Pdata_sub$stateabv,color = states$pmc)) + 
+  geom_point() + 
+  theme_bw() +
+   geom_text(label=Pdata_sub$stateabv, size=8)+
+  scale_fill_manual(values=c("red","blue")) +
+  labs(x = "Slength",
+       y = "Salary") 
+grid.arrange(p1, p2, p3,
+             ncol = 3)
+```
+The three plots are similar. In fact the k-means and the GMM produce the same clustering essentially. PAM produces a slightly different cluster where an additional data point is included (which actually makes sense). The rest of the characteristics in terms of inter-cluster distances cross cluster distances, etc. match what is already expected from subsections 5, 6 and 7.
+
+### 9. Validate
+
+Validation of kmeans:
+```{r}
+
+internal <- clValid(data_scaled, 2:15, 
+                    clMethods = c("kmeans"), 
+                    validation = "internal"); summary(internal)
+par(mfrow = c(2, 2))
+plot(internal, legend = FALSE,
+     type = "l",
+     main = " ")
+
+```
+Validation of GMM:
+```{r}
+suppressPackageStartupMessages(library(mclust))
+internal <- clValid(data_scaled, 2:15, 
+                    clMethods = c("model"), 
+                    validation = "internal"); summary(internal)
+par(mfrow = c(2, 2))
+plot(internal, legend = FALSE,
+     type = "l",
+     main = " ")
+
+```  
+Validation of PAM:
+```{r}
+library(mclust)
+internal <- clValid(data_scaled, 2:15, 
+                    clMethods = c("pam"), 
+                    validation = "internal"); summary(internal)
+par(mfrow = c(2, 2))
+plot(internal, legend = FALSE,
+     type = "l",
+     main = " ")
+
+```  
+I will focus for this analysis on the Dunn Index. It seems that the best Dunn Index varies by algorithm(and subsquently the optimal dunn values) which is suprising considering k-means is supposed to be similiar to PAM. 
+The Dunn Index increases with k for both PAM and to some extent with GMM (till k=9) after which it tapers off. Interestingly, k-means Dunn has two peaks for k-means. Part of the variability in Dunn distance could be because of the arbitary nature of the data, where there is a cluster that of far away points.
+### 10. Discussion
+
+#### a.
+Even though the actuals clusters are similiar/same for all three algorithms for k=2, it seems that the actual validation measures are different when k is not equal to two. For different algorithms, the optimal value of k is different. 
+
+#### b.
+It's not clear (not from the validation measures) but from the scatterplots that PAM is  the best measure at k=2. All algorithms capture the two main clusters in the data (the big cluster and the small cluster), but PAM captures that one point(IL) which is closer to the second cluster than the other two methods.
+
+#### c.
+If one was using WithinSquaresDistance(WSS) using k-means, it's a trivial fact that as k approaches n(number of data points), WSS limits to zero. 
